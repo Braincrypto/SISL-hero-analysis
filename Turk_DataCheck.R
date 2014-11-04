@@ -1,7 +1,9 @@
 library(plyr)
+library(reshape)
+library(ggplot2)
 
 # Computing aggregates at the user/cue level
-CreateTrialLog <- function(events){
+get_user_aggregate <- function(events, trial_list){
   SeqLength <- 30
   # events needs to be sorted by timestamp
   ordered_events <- arrange(events, event_time_ms)
@@ -9,62 +11,101 @@ CreateTrialLog <- function(events){
   # cue-created values aren't guaranteed to be in order.
   # These need to be sorted by cue_id
   # This serves to confirm the trial list they were given
-  cue_appear <- subset(events, response_type=='cue-created')
+  cue_appear <- subset(ordered_events, response_type=='cue-created')
+  cue_appear_idordered <- arrange(cue_appear, cue_id)
+  if (sum(abs(cue_appear$response_id - cue_appear_idordered$response_id)) > 0) {
+    sprintf("Cues did not appear in the right order for user", unique(events$user_token))
+  }
+  
   # I want to subset correct/incorrect responses
-  keys.correct.detail <- subset(events, response_type=='keydown-hit')
-  keys.incorrect.detail <- subset(events, response_type=='keydown-miss')
+  keys.correct.detail <- subset(ordered_events, response_type == 'keydown-hit')
+  keys.incorrect.detail <- subset(ordered_events, response_type == 'keydown-miss')
   
   # For each TRIAL/CUE, give me the number of correct/incorrect responses
   keys.correct.sum <- count(keys.correct.detail$cue_id)
   keys.incorrect.sum <- count(keys.incorrect.detail$cue_id)
   
   # we stick this all in a trial log
-  trialLog <- as.data.frame(matrix(data=0, nrow=4500, ncol=9))
-  names(trialLog) <- c('correct', 'incorrect', 'missed', 'score', 
+  trial_log <- as.data.frame(matrix(data=0, nrow=4500, ncol=10))
+  names(trial_log) <- c('correct', 'incorrect', 'missed', 'score', 
                        'trial', 'cue_value', 'response_count', 'ppt', 'block_structure')
-  trialLog$correct[keys.correct.sum$x] <- keys.correct.sum$freq
-  trialLog$incorrect[keys.incorrect.sum$x] <- keys.incorrect.sum$freq
-  trialLog$missed <- as.integer(trialLog$correct==0&trialLog$incorrect==0)
-  trialLog$score <- as.integer(trialLog$correct==1&trialLog$incorrect==0)
-  trialLog$trial <- 1:4500
-  trialLog$cue_value <- cue_appear$response_value
-  trialLog$response_count <- trialLog$correct+trialLog$incorrect
-  trialLog$ppt <- unique(events$user_token)
-  trialLog$block_structure <- c(rep(0,30),sort(rep(1:8,540)),rep(9,SeqLength*5))
+  trial_log$correct[keys.correct.sum$x] <- keys.correct.sum$freq
+  trial_log$incorrect[keys.incorrect.sum$x] <- keys.incorrect.sum$freq
+  trial_log$missed <- as.integer(trial_log$correct==0&trial_log$incorrect==0)
+  trial_log$score <- as.integer(trial_log$correct==1&trial_log$incorrect==0)
+  trial_log$trial <- 1:4500
+  trial_log$cue_id <- as.integer(cue_appear$response_value)
+  trial_log$category <- subset(trial_list, event_type == 'cue')$event_category
+  trial_log$response_count <- trial_log$correct+trial_log$incorrect
+  trial_log$ppt <- unique(ordered_events$user_token)
+  trial_log$block_structure <- c(rep(0,30),sort(rep(1:8,540)),rep(9,SeqLength*5))
   
-  return(trialLog)
+  return(trial_log)
 }
 
-# Start of code
-# reading in the turk data
-turkData <- read.csv('data/analysis_output_response.csv', header=T)
+get_trial_log <- function(mturk_data, trial_list) {
+  return(do.call(
+      rbind, 
+      by(mturk_data, 
+         mturk_data$user_token, 
+         function(x) {return(get_user_aggregate(x, trial_list))}))
+  )  
+}
+
+compute_stats <- function(trial_log) {
+  df_agg <- aggregate(data=trial_log, cbind(missed, correct, incorrect) ~ block_structure + category + ppt, FUN=function(x) c(mn =mean(x), sd=sd(x) ))
+  return(do.call(data.frame, df_agg))
+}
+
+plot_correct_curves <- function(stats) {
+  m <- ggplot(stats, aes(block_structure, correct, group=interaction(ppt, category)))
+  m + geom_line(aes(colour = factor(interaction(category)))) + 
+    geom_point(aes(colour = factor(interaction(category))))
+  # geom_point(aes(colour = factor(interaction(category, ppt))))
+}
+
+plot_curves <- function(stats, column) {
+  tempstats <- stats
+  tempstats[, "Y"] <- stats[, column]
+  m <- ggplot(tempstats, aes(block_structure, Y, group=interaction(ppt, category)))
+  m + geom_line(aes(colour = factor(interaction(category)))) + 
+    geom_point(aes(colour = factor(interaction(category)))) +
+    ylab(column)
+  # geom_point(aes(colour = factor(interaction(category, ppt))))
+}
+
+# Reading data
+mturk_data <- read.csv('data/analysis_output_response.csv', header=T)
+trial_list <- read.csv('data/trial_list_event.csv')
+
 # apply patch
-turkData$response_type <- turkData$response_type_corrected
+mturk_data$response_type <- mturk_data$response_type_corrected
+# remove cheater
+mturk_data <- mturk_data[-which(mturk_data$user_token %in% c('37XITHEISXIFWGSIWHB75ALT3HCCR5', 'A366DNZBOBFEC8-308Q0PEVB9M05JIWUA77PSJUABG9IT')), ]
 
 # which participants ran the study
-ppts.run<-unique(turkData$user_token)
+ppts.run <- unique(mturk_data$user_token)
 # How many people actually finished the experiment?
-ppts.finished<-turkData$user_token[grep('recogRating.5',turkData$response_type)]
+ppts.finished <- mturk_data$user_token[grep('recogRating.5',mturk_data$response_type)]
 # Create data frame of everyone who finished (THESE PEOPLE DESERVE CREDIT/MONEY)
-turkData.finished<-subset(turkData,turkData$user_token%in%ppts.finished)
+mturk_data.finished <- subset(mturk_data,mturk_data$user_token%in%ppts.finished)
 # Now I want the cue lists
-turkData.cues<-subset(turkData.finished,turkData.finished$response_type=='cue-created')
+mturk_data.cues <- subset(mturk_data.finished,mturk_data.finished$response_type=='cue-created')
 # And need to check if we got all the batches!
-count.of.cues.created<-count(turkData.cues$user_token)
+count.of.cues.created <- count(mturk_data.cues$user_token)
 # completed actually refers to if the data set is complete (we have all the batches)
-ppts.complete<-(count.of.cues.created$x[count.of.cues.created$freq==4500])
+ppts.complete <- count.of.cues.created$x[count.of.cues.created$freq==4500]
 # This is the subset of the data with all the usable data
-turkData.complete<-subset(turkData,turkData$user_token%in%ppts.complete)
+mturk_data.complete <-subset(mturk_data,mturk_data$user_token%in%ppts.complete)
+
+
 # Now I want to create a readable/scorable trial log
-turkData.TrialLog<-do.call(rbind,by(turkData.complete,turkData.complete$user_token,CreateTrialLog))
-
-# I need to make sure the trial_list and cue_events match up, so I need to load this in.
-# Plus, it has info on the sequence, which will make my life easier.
-trial_list<-read.csv('data/trial_list_event.csv')
-trial_list_cues<-subset(trial_list,event_type=='cue')
-
-# This will return true if the trial lists are all matching
-all(turkData.TrialLog$cue_value==rep(trial_list_cues$event_value,dim(turkData.TrialLog)[1]/4500))
+mturk_data.trial_log <- get_trial_log(mturk_data.complete, trial_list)
+stats <- compute_stats(mturk_data.trial_log)
+plot_curves(stats, column="correct.mn")
+plot_curves(stats, column="correct.sd")
+plot_curves(stats, column="incorrect.mn")
+plot_curves(stats, column="incorrect.sd")
 
 # TO DO
 # Double check the category assignment from the trial list correct
