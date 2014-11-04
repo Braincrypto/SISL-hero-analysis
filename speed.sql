@@ -3,7 +3,7 @@ SELECT
 	MIN(response_speed), 
 	MAX(response_speed), 
 	MAX(cue_id) 
-FROM g_sisl_hero.output_response 
+FROM output_response 
 WHERE 
 	response_type = 'speed-change' 
 GROUP BY 
