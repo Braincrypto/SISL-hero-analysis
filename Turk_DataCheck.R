@@ -53,15 +53,26 @@ get_trial_log <- function(mturk_data, trial_list) {
 }
 
 compute_stats <- function(trial_log) {
-  df_agg <- aggregate(data=trial_log, cbind(missed, correct, incorrect) ~ block_structure + category + ppt, FUN=function(x) c(mn =mean(x), sd=sd(x) ))
+  df_agg <- aggregate(data=trial_log, 
+                      cbind(missed, correct, incorrect) ~ block_structure + category + ppt, 
+                      FUN=function(x) c(mn =mean(x), sd=sd(x) ))
   return(do.call(data.frame, df_agg))
 }
 
-plot_correct_curves <- function(stats) {
-  m <- ggplot(stats, aes(block_structure, correct, group=interaction(ppt, category)))
-  m + geom_line(aes(colour = factor(interaction(category)))) + 
-    geom_point(aes(colour = factor(interaction(category))))
-  # geom_point(aes(colour = factor(interaction(category, ppt))))
+compute_stats_diff <- function(stats) {
+  return(aggregate(data=stats, 
+                   cbind(missed.mn, missed.sd, 
+                         correct.mn, correct.sd, 
+                         incorrect.mn, incorrect.sd) ~ block_structure + ppt, 
+                   FUN=function(x) x[2]-x[1]))
+}
+
+compute_general_stats_diff <- function(stats) {
+  return(aggregate(data=stats, 
+                   cbind(missed.mn, missed.sd, 
+                         correct.mn, correct.sd, 
+                         incorrect.mn, incorrect.sd) ~ block_structure, 
+                   FUN=mean))
 }
 
 plot_curves <- function(stats, column) {
@@ -71,7 +82,24 @@ plot_curves <- function(stats, column) {
   m + geom_line(aes(colour = factor(interaction(category)))) + 
     geom_point(aes(colour = factor(interaction(category)))) +
     ylab(column)
-  # geom_point(aes(colour = factor(interaction(category, ppt))))
+}
+
+plot_diff_curves <- function(stats, column) {
+  tempstats <- stats
+  tempstats[, "Y"] <- stats[, column]
+  m <- ggplot(tempstats, aes(block_structure, Y, group=interaction(ppt)))
+  m + geom_line(aes(colour = factor(interaction(ppt)))) + 
+    geom_point(aes(colour = factor(interaction(ppt)))) +
+    ylab(column)
+}
+
+plot_general_diff_curves <- function(stats, column) {
+  tempstats <- stats
+  tempstats[, "Y"] <- stats[, column]
+  m <- ggplot(tempstats, aes(block_structure, Y))
+  m + geom_line() + 
+    geom_point() +
+    ylab(column)
 }
 
 # Reading data
@@ -102,10 +130,16 @@ mturk_data.complete <-subset(mturk_data,mturk_data$user_token%in%ppts.complete)
 # Now I want to create a readable/scorable trial log
 mturk_data.trial_log <- get_trial_log(mturk_data.complete, trial_list)
 stats <- compute_stats(mturk_data.trial_log)
+stats_diff <- compute_stats_diff(stats)
+stats_general_diff <- compute_general_stats_diff(stats_diff)
 plot_curves(stats, column="correct.mn")
 plot_curves(stats, column="correct.sd")
 plot_curves(stats, column="incorrect.mn")
 plot_curves(stats, column="incorrect.sd")
+plot_diff_curves(stats_diff, column="correct.mn")
+plot_diff_curves(stats_diff, column="correct.sd")
+plot_general_diff_curves(stats_general_diff, column="correct.mn")
+plot_general_diff_curves(stats_general_diff, column="correct.sd")
 
 # TO DO
 # Double check the category assignment from the trial list correct
