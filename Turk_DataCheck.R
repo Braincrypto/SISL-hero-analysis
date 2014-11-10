@@ -4,6 +4,7 @@ library(ggplot2)
 
 # Computing aggregates at the user/cue level
 get_user_aggregate <- function(events, trial_list){
+  print(sprintf("[INFO] Token %s", unique(events$user_token)))
   SeqLength <- 30
   # events needs to be sorted by timestamp
   ordered_events <- arrange(events, event_time_ms)
@@ -13,9 +14,25 @@ get_user_aggregate <- function(events, trial_list){
   # This serves to confirm the trial list they were given
   cue_appear <- subset(ordered_events, response_type=='cue-created')
   cue_appear_idordered <- arrange(cue_appear, cue_id)
+  
+  # check ordering
   if (sum(abs(cue_appear$response_id - cue_appear_idordered$response_id)) > 0) {
-    sprintf("Cues did not appear in the right order for user", unique(events$user_token))
+    print(sprintf("[CRITICAL] Cues did not appear in the right order for user", unique(events$user_token)))
   }
+  
+  # check distances
+  events.dialog <- which(trial_list$event_type!='cue')
+  cues.before.dialog <- trial_list$cue_id[events.dialog-1]
+  timing <- cue_appear
+  theoretical_diff <- subset(trial_list, event_type=='cue' & !cue_id%in%cues.before.dialog)$dist_norm
+  time_diff <- timing$event_time_ms[-1] - timing$event_time_ms[1:nrow(timing)-1]
+  dist_diff <- time_diff * timing$response_speed[1:nrow(timing)-1] / 2000
+  dist_diff <- dist_diff[-cues.before.dialog]
+  
+  diff <- dist_diff - theoretical_diff
+  absdiff <- abs(diff)
+  print(sprintf("[INFO] Cues appear difference with reality: mean %f, std %f, max %f", mean(absdiff), sd(absdiff), max(absdiff)))
+  
   
   # I want to subset correct/incorrect responses
   keys.correct.detail <- subset(ordered_events, response_type == 'keydown-hit')
