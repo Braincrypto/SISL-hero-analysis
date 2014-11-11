@@ -35,25 +35,38 @@ get_user_aggregate <- function(events, trial_list){
   
   
   # I want to subset correct/incorrect responses
-  keys.correct.detail <- subset(ordered_events, response_type == 'keydown-hit')
-  keys.incorrect.detail <- subset(ordered_events, response_type == 'keydown-miss')
+  all_events <- merge(x = ordered_events, y = trial_list, by = "cue_id", all.x = T)
+  
+  keys.correct.detail <- subset(all_events, response_type == 'keydown-hit')
+  keys.incorrect.detail <- subset(all_events, response_type == 'keydown-miss')
+  keys.almostcorrect.details <- subset(keys.incorrect.detail, response_value == event_value)
   
   # For each TRIAL/CUE, give me the number of correct/incorrect responses
   keys.correct.sum <- count(keys.correct.detail$cue_id)
   keys.incorrect.sum <- count(keys.incorrect.detail$cue_id)
+  keys.almostcorrect.sum <- count(keys.almostcorrect.details$cue_id)
   
   # we stick this all in a trial log
-  trial_log <- as.data.frame(matrix(data=0, nrow=4500, ncol=10))
-  names(trial_log) <- c('correct', 'incorrect', 'missed', 'score', 
-                       'trial', 'cue_value', 'response_count', 'ppt', 'block_structure')
-  trial_log$correct[keys.correct.sum$x] <- keys.correct.sum$freq
-  trial_log$incorrect[keys.incorrect.sum$x] <- keys.incorrect.sum$freq
-  trial_log$missed <- as.integer(trial_log$correct==0&trial_log$incorrect==0)
-  trial_log$score <- as.integer(trial_log$correct==1&trial_log$incorrect==0)
+  trial_log <- as.data.frame(matrix(data=0, nrow=4500, ncol=13))
+  names(trial_log) <- c('correct.freq', 'almostcorrect.freq', 'incorrect.freq', 
+                        'correct.ind' , 'almostcorrect.ind' , 'incorrect.ind', 'missed.ind', 
+                        'score', 'trial', 
+                        'cue_value', 'response_count', 'ppt', 'block_structure')
+  trial_log$correct.freq[keys.correct.sum$x] <- keys.correct.sum$freq
+  trial_log$almostcorrect.freq[keys.almostcorrect.sum$x] <- keys.almostcorrect.sum$freq
+  trial_log$incorrect.freq[keys.incorrect.sum$x] <- keys.incorrect.sum$freq
+  
+  trial_log$correct.ind <- as.integer(trial_log$correct.freq==1)
+  trial_log$incorrect.ind <- as.integer(trial_log$incorrect.freq>0)
+  trial_log$almostcorrect.ind <- as.integer(trial_log$correct.freq==0 & trial_log$almostcorrect.freq>0)
+  trial_log$missed.ind <- as.integer(trial_log$correct.freq==0 & trial_log$incorrect.freq==0)
+  
+  trial_log$score <- as.integer(trial_log$correct.ind==1 & trial_log$incorrect.ind==0)
+
   trial_log$trial <- 1:4500
   trial_log$cue_id <- as.integer(cue_appear$response_value)
   trial_log$category <- subset(trial_list, event_type == 'cue')$event_category
-  trial_log$response_count <- trial_log$correct+trial_log$incorrect
+  trial_log$response_count <- trial_log$correct.freq + trial_log$incorrect.freq
   trial_log$ppt <- unique(ordered_events$user_token)
   trial_log$block_structure <- c(rep(0,30),sort(rep(1:8,540)),rep(9,SeqLength*5))
   
@@ -69,26 +82,28 @@ get_trial_log <- function(mturk_data, trial_list) {
   )  
 }
 
-compute_stats <- function(trial_log) {
+compute_stats <- function(trial_log, vars=c("correct.ind", "incorrect.ind", "almostcorrect.ind", "missed.ind")) {
+  fmlstr <- paste("cbind(", paste(vars, collapse=", "), ") ~ 
+                       block_structure + category + ppt", sep="")
   df_agg <- aggregate(data=trial_log, 
-                      cbind(missed, correct, incorrect) ~ block_structure + category + ppt, 
-                      FUN=function(x) c(mn =mean(x), sd=sd(x) ))
+                      formula(fmlstr), 
+                      FUN=function(x) c(mn=mean(x), sd=sd(x) ))
   return(do.call(data.frame, df_agg))
 }
 
-compute_stats_diff <- function(stats) {
+compute_stats_diff <- function(stats, vars=c("correct.ind", "incorrect.ind", "almostcorrect.ind", "missed.ind")) {
+  fmlstr <- paste("cbind(", paste(vars, collapse=", "), ") ~ 
+                       block_structure + ppt", sep="")
   return(aggregate(data=stats, 
-                   cbind(missed.mn, missed.sd, 
-                         correct.mn, correct.sd, 
-                         incorrect.mn, incorrect.sd) ~ block_structure + ppt, 
+                   formula(fmlstr), 
                    FUN=function(x) x[2]-x[1]))
 }
 
-compute_general_stats_diff <- function(stats) {
+compute_general_stats_diff <- function(stats, vars=c("correct.ind", "incorrect.ind", "almostcorrect.ind", "missed.ind")) {
+  fmlstr <- paste("cbind(", paste(vars, collapse=", "), ") ~ 
+                       block_structure", sep="")
   return(aggregate(data=stats, 
-                   cbind(missed.mn, missed.sd, 
-                         correct.mn, correct.sd, 
-                         incorrect.mn, incorrect.sd) ~ block_structure, 
+                   formula(fmlstr), 
                    FUN=mean))
 }
 
@@ -146,17 +161,32 @@ mturk_data.complete <-subset(mturk_data,mturk_data$user_token%in%ppts.complete)
 
 # Now I want to create a readable/scorable trial log
 mturk_data.trial_log <- get_trial_log(mturk_data.complete, trial_list)
-stats <- compute_stats(mturk_data.trial_log)
-stats_diff <- compute_stats_diff(stats)
-stats_general_diff <- compute_general_stats_diff(stats_diff)
-plot_curves(stats, column="correct.mn")
-plot_curves(stats, column="correct.sd")
-plot_curves(stats, column="incorrect.mn")
-plot_curves(stats, column="incorrect.sd")
-plot_diff_curves(stats_diff, column="correct.mn")
-plot_diff_curves(stats_diff, column="correct.sd")
-plot_general_diff_curves(stats_general_diff, column="correct.mn")
-plot_general_diff_curves(stats_general_diff, column="correct.sd")
+stats <- compute_stats(
+  mturk_data.trial_log, c("correct.ind", "incorrect.ind", "almostcorrect.ind", "missed.ind"))
+stats_diff <- compute_stats_diff(
+  stats, c("correct.ind.mn", "incorrect.ind.mn", "almostcorrect.ind.mn", "missed.ind.mn"))
+stats_general_diff <- compute_general_stats_diff(
+  stats_diff, c("correct.ind.mn", "incorrect.ind.mn", "almostcorrect.ind.mn", "missed.ind.mn"))
+
+plot_curves(stats, column="correct.ind.mn")
+plot_curves(stats, column="correct.ind.sd")
+plot_curves(stats, column="incorrect.ind.mn")
+plot_curves(stats, column="incorrect.ind.sd")
+plot_curves(stats, column="almostcorrect.ind.mn")
+plot_curves(stats, column="almostcorrect.ind.sd")
+plot_curves(stats, column="missed.ind.mn")
+plot_curves(stats, column="missed.ind.sd")
+
+plot_diff_curves(stats_diff, column="correct.ind.mn")
+plot_diff_curves(stats_diff, column="incorrect.ind.mn")
+plot_diff_curves(stats_diff, column="almostcorrect.ind.mn")
+plot_diff_curves(stats_diff, column="missed.ind.mn")
+
+plot_general_diff_curves(stats_general_diff, column="correct.ind.mn")
+plot_general_diff_curves(stats_general_diff, column="almostcorrect.ind.mn")
+plot_general_diff_curves(stats_general_diff, column="incorrect.ind.mn")
+plot_general_diff_curves(stats_general_diff, column="missed.ind.mn")
+
 
 # TO DO
 # Double check the category assignment from the trial list correct
