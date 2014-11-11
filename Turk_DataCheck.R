@@ -47,9 +47,9 @@ get_user_aggregate <- function(events, trial_list){
   keys.almostcorrect.sum <- count(keys.almostcorrect.details$cue_id)
   
   # we stick this all in a trial log
-  trial_log <- as.data.frame(matrix(data=0, nrow=4500, ncol=13))
+  trial_log <- as.data.frame(matrix(data=0, nrow=4500, ncol=14))
   names(trial_log) <- c('correct.freq', 'almostcorrect.freq', 'incorrect.freq', 
-                        'correct.ind' , 'almostcorrect.ind' , 'incorrect.ind', 'missed.ind', 
+                        'correct.ind' , 'almostcorrect.ind', 'allcorrect.ind', 'incorrect.ind', 'missed.ind', 
                         'score', 'trial', 
                         'cue_value', 'response_count', 'ppt', 'block_structure')
   trial_log$correct.freq[keys.correct.sum$x] <- keys.correct.sum$freq
@@ -59,6 +59,7 @@ get_user_aggregate <- function(events, trial_list){
   trial_log$correct.ind <- as.integer(trial_log$correct.freq==1)
   trial_log$incorrect.ind <- as.integer(trial_log$incorrect.freq>0)
   trial_log$almostcorrect.ind <- as.integer(trial_log$correct.freq==0 & trial_log$almostcorrect.freq>0)
+  trial_log$allcorrect.ind <- as.integer(trial_log$correct.freq==1 | trial_log$almostcorrect.freq>0)
   trial_log$missed.ind <- as.integer(trial_log$correct.freq==0 & trial_log$incorrect.freq==0)
   
   trial_log$score <- as.integer(trial_log$correct.ind==1 & trial_log$incorrect.ind==0)
@@ -162,11 +163,11 @@ mturk_data.complete <-subset(mturk_data,mturk_data$user_token%in%ppts.complete)
 # Now I want to create a readable/scorable trial log
 mturk_data.trial_log <- get_trial_log(mturk_data.complete, trial_list)
 stats <- compute_stats(
-  mturk_data.trial_log, c("correct.ind", "incorrect.ind", "almostcorrect.ind", "missed.ind"))
+  mturk_data.trial_log, c("correct.ind", "incorrect.ind", "almostcorrect.ind", "allcorrect.ind", "missed.ind"))
 stats_diff <- compute_stats_diff(
-  stats, c("correct.ind.mn", "incorrect.ind.mn", "almostcorrect.ind.mn", "missed.ind.mn"))
+  stats, c("correct.ind.mn", "incorrect.ind.mn", "almostcorrect.ind.mn", "allcorrect.ind.mn", "missed.ind.mn"))
 stats_general_diff <- compute_general_stats_diff(
-  stats_diff, c("correct.ind.mn", "incorrect.ind.mn", "almostcorrect.ind.mn", "missed.ind.mn"))
+  stats_diff, c("correct.ind.mn", "incorrect.ind.mn", "almostcorrect.ind.mn", "allcorrect.ind.mn", "missed.ind.mn"))
 
 plot_curves(stats, column="correct.ind.mn")
 plot_curves(stats, column="correct.ind.sd")
@@ -174,16 +175,20 @@ plot_curves(stats, column="incorrect.ind.mn")
 plot_curves(stats, column="incorrect.ind.sd")
 plot_curves(stats, column="almostcorrect.ind.mn")
 plot_curves(stats, column="almostcorrect.ind.sd")
+plot_curves(stats, column="allcorrect.ind.mn")
+plot_curves(stats, column="allcorrect.ind.sd")
 plot_curves(stats, column="missed.ind.mn")
 plot_curves(stats, column="missed.ind.sd")
 
 plot_diff_curves(stats_diff, column="correct.ind.mn")
 plot_diff_curves(stats_diff, column="incorrect.ind.mn")
 plot_diff_curves(stats_diff, column="almostcorrect.ind.mn")
+plot_diff_curves(stats_diff, column="allcorrect.ind.mn")
 plot_diff_curves(stats_diff, column="missed.ind.mn")
 
 plot_general_diff_curves(stats_general_diff, column="correct.ind.mn")
 plot_general_diff_curves(stats_general_diff, column="almostcorrect.ind.mn")
+plot_general_diff_curves(stats_general_diff, column="allcorrect.ind.mn")
 plot_general_diff_curves(stats_general_diff, column="incorrect.ind.mn")
 plot_general_diff_curves(stats_general_diff, column="missed.ind.mn")
 
