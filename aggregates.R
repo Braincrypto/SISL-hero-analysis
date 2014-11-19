@@ -31,6 +31,7 @@ get_user_aggregate <- function(events, trial_list){
   
   diff <- dist_diff - theoretical_diff
   absdiff <- abs(diff)
+  # plot(timing$event_time_ms[-cues.before.dialog], absdiff)
   print(sprintf("[INFO] Cues appear difference with reality: mean %f, std %f, max %f", mean(absdiff), sd(absdiff), max(absdiff)))
   
   
@@ -46,12 +47,19 @@ get_user_aggregate <- function(events, trial_list){
   keys.incorrect.sum <- count(keys.incorrect.detail$cue_id)
   keys.almostcorrect.sum <- count(keys.almostcorrect.details$cue_id)
   
+  closest_to_zero <- function(x) {
+    ord <- order(abs(x))
+    return(x[ord[1]])
+  }
+  cues.correct.offset <- aggregate(response_dist_norm ~ cue_id, data=keys.correct.detail, FUN=closest_to_zero)
+  cues.incorrect.offset <- aggregate(response_dist_norm ~ cue_id, data=keys.incorrect.detail, FUN=closest_to_zero)
+  
   # we stick this all in a trial log
-  trial_log <- as.data.frame(matrix(data=0, nrow=4500, ncol=14))
+  trial_log <- as.data.frame(matrix(data=0, nrow=4500, ncol=17))
   names(trial_log) <- c('correct.freq', 'almostcorrect.freq', 'incorrect.freq', 
                         'correct.ind' , 'almostcorrect.ind', 'allcorrect.ind', 'incorrect.ind', 'missed.ind', 
-                        'score', 'trial', 'speed'
-                        'cue_id', 'response_count', 'ppt', 'block_structure')
+                        'score', 'cue_id', 'speed', 'correct.offset', 'incorrect.bestoffset',
+                        'cue_number', 'response_count', 'ppt', 'block_structure')
   trial_log$correct.freq[keys.correct.sum$x] <- keys.correct.sum$freq
   trial_log$almostcorrect.freq[keys.almostcorrect.sum$x] <- keys.almostcorrect.sum$freq
   trial_log$incorrect.freq[keys.incorrect.sum$x] <- keys.incorrect.sum$freq
@@ -64,8 +72,11 @@ get_user_aggregate <- function(events, trial_list){
   
   trial_log$score <- as.integer(trial_log$correct.ind==1 & trial_log$incorrect.ind==0)
 
-  trial_log$trial <- 1:4500
-  trial_log$cue_id <- as.integer(cue_appear$response_value)
+  trial_log$cue_id <- 1:4500
+  trial_log$correct.offset[cues.correct.offset$cue_id] <- cues.correct.offset$response_dist_norm
+  trial_log$incorrect.bestoffset[cues.incorrect.offset$cue_id] <- cues.incorrect.offset$response_dist_norm
+  trial_log$speed[cue_appear$cue_id] <- cue_appear$response_speed
+  trial_log$cue_number <- as.integer(cue_appear$response_value)
   trial_log$category <- subset(trial_list, event_type == 'cue')$event_category
   trial_log$response_count <- trial_log$correct.freq + trial_log$incorrect.freq
   trial_log$ppt <- unique(ordered_events$user_token)
@@ -81,58 +92,6 @@ get_trial_log <- function(mturk_data, trial_list) {
          mturk_data$user_token, 
          function(x) {return(get_user_aggregate(x, trial_list))}))
   )  
-}
-
-compute_stats <- function(trial_log, vars=c("correct.ind", "incorrect.ind", "almostcorrect.ind", "missed.ind")) {
-  fmlstr <- paste("cbind(", paste(vars, collapse=", "), ") ~ 
-                       block_structure + category + ppt", sep="")
-  df_agg <- aggregate(data=trial_log, 
-                      formula(fmlstr), 
-                      FUN=function(x) c(mn=mean(x), sd=sd(x) ))
-  return(do.call(data.frame, df_agg))
-}
-
-compute_stats_diff <- function(stats, vars=c("correct.ind", "incorrect.ind", "almostcorrect.ind", "missed.ind")) {
-  fmlstr <- paste("cbind(", paste(vars, collapse=", "), ") ~ 
-                       block_structure + ppt", sep="")
-  return(aggregate(data=stats, 
-                   formula(fmlstr), 
-                   FUN=function(x) x[2]-x[1]))
-}
-
-compute_general_stats_diff <- function(stats, vars=c("correct.ind", "incorrect.ind", "almostcorrect.ind", "missed.ind")) {
-  fmlstr <- paste("cbind(", paste(vars, collapse=", "), ") ~ 
-                       block_structure", sep="")
-  return(aggregate(data=stats, 
-                   formula(fmlstr), 
-                   FUN=mean))
-}
-
-plot_curves <- function(stats, column) {
-  tempstats <- stats
-  tempstats[, "Y"] <- stats[, column]
-  m <- ggplot(tempstats, aes(block_structure, Y, group=interaction(ppt, category)))
-  m + geom_line(aes(colour = factor(interaction(category)))) + 
-    geom_point(aes(colour = factor(interaction(category)))) +
-    ylab(column)
-}
-
-plot_diff_curves <- function(stats, column) {
-  tempstats <- stats
-  tempstats[, "Y"] <- stats[, column]
-  m <- ggplot(tempstats, aes(block_structure, Y, group=interaction(ppt)))
-  m + geom_line(aes(colour = factor(interaction(ppt)))) + 
-    geom_point(aes(colour = factor(interaction(ppt)))) +
-    ylab(column)
-}
-
-plot_general_diff_curves <- function(stats, column) {
-  tempstats <- stats
-  tempstats[, "Y"] <- stats[, column]
-  m <- ggplot(tempstats, aes(block_structure, Y))
-  m + geom_line() + 
-    geom_point() +
-    ylab(column)
 }
 
 # Reading data
@@ -162,45 +121,3 @@ mturk_data.complete <-subset(mturk_data,mturk_data$user_token%in%ppts.complete)
 
 # Now I want to create a readable/scorable trial log
 mturk_data.trial_log <- get_trial_log(mturk_data.complete, trial_list)
-stats <- compute_stats(
-  mturk_data.trial_log, c("correct.ind", "incorrect.ind", "almostcorrect.ind", "allcorrect.ind", "missed.ind"))
-stats_diff <- compute_stats_diff(
-  stats, c("correct.ind.mn", "incorrect.ind.mn", "almostcorrect.ind.mn", "allcorrect.ind.mn", "missed.ind.mn"))
-stats_general_diff <- compute_general_stats_diff(
-  stats_diff, c("correct.ind.mn", "incorrect.ind.mn", "almostcorrect.ind.mn", "allcorrect.ind.mn", "missed.ind.mn"))
-
-plot_curves(stats, column="correct.ind.mn")
-plot_curves(stats, column="correct.ind.sd")
-plot_curves(stats, column="incorrect.ind.mn")
-plot_curves(stats, column="incorrect.ind.sd")
-plot_curves(stats, column="almostcorrect.ind.mn")
-plot_curves(stats, column="almostcorrect.ind.sd")
-plot_curves(stats, column="allcorrect.ind.mn")
-plot_curves(stats, column="allcorrect.ind.sd")
-plot_curves(stats, column="missed.ind.mn")
-plot_curves(stats, column="missed.ind.sd")
-
-plot_diff_curves(stats_diff, column="correct.ind.mn")
-plot_diff_curves(stats_diff, column="incorrect.ind.mn")
-plot_diff_curves(stats_diff, column="almostcorrect.ind.mn")
-plot_diff_curves(stats_diff, column="allcorrect.ind.mn")
-plot_diff_curves(stats_diff, column="missed.ind.mn")
-
-plot_general_diff_curves(stats_general_diff, column="correct.ind.mn")
-plot_general_diff_curves(stats_general_diff, column="almostcorrect.ind.mn")
-plot_general_diff_curves(stats_general_diff, column="allcorrect.ind.mn")
-plot_general_diff_curves(stats_general_diff, column="incorrect.ind.mn")
-plot_general_diff_curves(stats_general_diff, column="missed.ind.mn")
-
-
-# TO DO
-# Double check the category assignment from the trial list correct
-check_trial_list <- function(trial_list, seq_length) {
-  sequence_repeated <- subset(trial_list, event_category==1)
-  all_sequences <- matrix(sequence_repeated$event_value, ncol=seq_length, byrow=T)
-  return(all_sequences)
-}
-
-# Extracted sequences
-seqs <- check_trial_list(trial_list, 30)
-dist_seqs <- count(seqs)
