@@ -1,7 +1,11 @@
 setwd("~/SISL/")
-# Reading data
+
+# == Reading data ==
 mturk_data <- read.csv('data/fromdb/dumps/dump20150208/output_response.csv', header=T)
 trial_list <- read.csv('data/fromdb/dumps/dump20150208/trial_list_event.csv')
+
+# == Filtering out some bad workers. ==
+# You can ignore that.
 
 # scenario 8
 mturk_data <- mturk_data[which(mturk_data$user_token %in% 
@@ -43,6 +47,8 @@ mturk_data <- subset(mturk_data, !(user_token %in%
                                    'A2M5VW97GIYLHB-31LM9EDVOM1HPW6WD2BCJUTE0KMNJ0'
                                  )))
 
+# == Loading parameters ===
+
 # Learning/ Null 4-cues
 learning_scenari <- c(14, 15, 16, 17)
 null_scenari <- c(18, 19, 20 , 21, 22)
@@ -56,13 +62,17 @@ seqlen <- 30
 num_cues <- 4500
 block_structure <- c(rep(0, 30), sort(rep(1:8, 540)), rep(9, seqlen * 5))
 
-# Computing
+# == Computing logs  ==
 mturk_data.learning <- subset(mturk_data, scenario_id %in% learning_scenari)
 mturk_data.null <- subset(mturk_data, scenario_id %in% null_scenari)
 mturk_data.learning.trial_log <- get_trial_log(mturk_data.learning, trial_list, block_structure, 2000, num_cues)
 mturk_data.null.trial_log <- get_trial_log(mturk_data.null, trial_list, block_structure, 2000, num_cues)
 
+# == Check sanity ==
+
 # aggregate(speed ~ ppt, mturk_data.trial_log, function(x) min(x))
+
+# == Select log for stats ==
 
 mturk_data.trial_log <- mturk_data.learning.trial_log
 mturk_data.trial_log <- mturk_data.null.trial_log

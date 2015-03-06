@@ -1,8 +1,7 @@
 library(plyr)
 library(reshape)
-library(ggplot2)
 
-# Computing aggregates at the user/cue level
+#  == Computing aggregates at the user/cue level ==
 get_user_aggregate <- function(events, trial_list, block_structure, time_to_show=2000, ncues=4500){
   current_scenario_id = unique(events$scenario_id)
   current_trial_list = subset(trial_list, scenario_id == current_scenario_id)
@@ -57,13 +56,13 @@ get_user_aggregate <- function(events, trial_list, block_structure, time_to_show
   cues.incorrect.offset <- aggregate(response_dist_norm ~ cue_id, data=keys.incorrect.detail, FUN=closest_to_zero)
   
   # we stick this all in a trial log
-  trial_log <- as.data.frame(matrix(data=0, nrow=ncues, ncol=19))
+  trial_log <- as.data.frame(matrix(data=0, nrow=ncues, ncol=20))
   names(trial_log) <- c('correct.freq', 'almostcorrect.freq', 'incorrect.freq', 
                         'correct.ind' , 'almostcorrect.ind', 'allcorrect.ind', 'incorrect.ind', 'missed.ind', 
                         'score', 'cue_id', 'speed', 'correct.offset', 'incorrect.bestoffset',
                         'cue_number', 'response_count', 
                         'experimental.dist', 'theoretical.dist',
-                        'ppt', 'block_structure')
+                        'ppt', 'block_structure', 'scenario_id')
   trial_log$correct.freq[keys.correct.sum$x] <- keys.correct.sum$freq
   trial_log$almostcorrect.freq[keys.almostcorrect.sum$x] <- keys.almostcorrect.sum$freq
   trial_log$incorrect.freq[keys.incorrect.sum$x] <- keys.incorrect.sum$freq
@@ -89,6 +88,7 @@ get_user_aggregate <- function(events, trial_list, block_structure, time_to_show
   
   # trial_log$block_structure <- c(rep(0, SeqLength), sort(rep(1:8, 540)), rep(9, SeqLength*5))
   trial_log$block_structure <- block_structure
+  trial_log$scenario_id <- current_scenario_id
   
   return(trial_log)
 }
@@ -102,11 +102,53 @@ get_trial_log <- function(mturk_data, trial_list, block_structure, time_to_show,
   )  
 }
 
-# trial_log$block_structure <- c(rep(0, SeqLength), sort(rep(1:8, 540)), rep(9, SeqLength*5))
-# trial_list$block_structure <- c(rep(0, 2 * SeqLength), sort(rep(1:7, 480)), rep(9, SeqLength*15))
+# == Computing stats over the logs ==
 
-# Now I want to create a readable/scorable trial log
-# mturk_data.learning.trial_log <- get_trial_log(mturk_data.learning, trial_list, block_structure, 2000, 3564)
+compute_stats <- function(trial_log, vars=c("correct.ind", "incorrect.ind", "almostcorrect.ind", "missed.ind")) {
+  fmlstr <- paste("cbind(", paste(vars, collapse=", "), ") ~ 
+                       block_structure + category + ppt", sep="")
+  df_agg <- aggregate(data=trial_log, 
+                      formula(fmlstr), 
+                      FUN=function(x) c(mn=mean(x), sd=sd(x) ))
+  return(do.call(data.frame, df_agg))
+}
 
-# category fix
-#mturk_data.learning.trial_log$category <- mturk_data.trial_log$category
+compute_stats_diff <- function(stats, vars=c("correct.ind", "incorrect.ind", "almostcorrect.ind", "missed.ind")) {
+  fmlstr <- paste("cbind(", paste(vars, collapse=", "), ") ~ 
+                  block_structure + ppt", sep="")
+  return(aggregate(data=stats, 
+                   formula(fmlstr), 
+                   FUN=function(x) x[2]-x[1]))
+}
+
+compute_general_stats_diff <- function(stats, vars=c("correct.ind", "incorrect.ind", "almostcorrect.ind", "missed.ind")) {
+  fmlstr <- paste("cbind(", paste(vars, collapse=", "), ") ~ 
+                  block_structure", sep="")
+  return(aggregate(data=stats, 
+                   formula(fmlstr), 
+                   FUN=mean))
+}
+
+# == Compute signature stats over logs ==
+
+get_trial_signature <- function(trial_log, structure, seqlen) {
+  filtered_log <- subset(trial_log, category == 1 & block_structure == structure)
+  
+  return(do.call(
+    rbind, 
+    by(filtered_log, 
+       filtered_log$ppt, 
+       function(filtered_events) {
+         nb_seq <- nrow(filtered_events) / seqlen
+         cue_seq <- rep(1:seqlen, nb_seq)
+         filtered_events["seq.cue.id"] <- cue_seq
+         filtered_events["correct.offset.computed"] <- filtered_events$correct.offset + 
+           filtered_events$incorrect.bestoffset +
+           filtered_events$incorrect.ind * filtered_events$experimental.dist
+         df_agg <- aggregate(data=filtered_events, 
+                             cbind(correct.ind, correct.offset, correct.offset.computed) ~ seq.cue.id + ppt + category + block_structure, 
+                             FUN=function(x) c(mn=mean(x), sd=sd(x)))
+         return(do.call(data.frame, df_agg));
+       }))
+  )  
+}
